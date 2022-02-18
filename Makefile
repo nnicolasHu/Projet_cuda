@@ -239,3 +239,5 @@ run: build
 clean:
 	rm -f advectiondiffusion advectiondiffusion.o
 clobber: clean
+
+seq : advectiondiffusion_seq.exe
