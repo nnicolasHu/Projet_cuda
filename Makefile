@@ -241,3 +241,9 @@ clean:
 clobber: clean
 
 seq : advectiondiffusion_seq.exe
+
+advectiondiffusion_seq.exe : advectiondiffusion_seq.o
+    mpic++ -Wall -fPIC -O2 -mtune=native -fopenmp -o advectiondiffusion_seq.exe advectiondiffusion_seq.o $(LIBRARIES)
+
+advectiondiffusion_seq.o : advectiondiffusion_seq.cpp
+    mpic++ -Wall -fPIC -O2 -mtune=native -fopenmp -c advectiondiffusion_seq.cpp -o advectiondiffusion_seq.o
