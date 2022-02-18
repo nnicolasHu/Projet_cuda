@@ -1,6 +1,5 @@
 # include <cstdlib>
 # include <cmath>
-# include <mpi.h>
 # include <algorithm>
 # include <iostream>
 # include <cassert>
@@ -56,15 +55,15 @@ void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* d
   const double yinit = 5;
 
   for (int64_t i = 0; i < ndim_tab[0] ; ++i ){
-     x[i] = (i-2)*dx[0] + x0;
-  for (int64_t j = 0; j < ndim_tab[1] ; ++j ){
-     y[j] = (j-2)*dx[1] + y0;
+    x[i] = (i-2)*dx[0] + x0;
+    for (int64_t j = 0; j < ndim_tab[1] ; ++j ){
+      y[j] = (j-2)*dx[1] + y0;
 
-     int l = j*ndim_tab[0]+ i;
+      int l = j*ndim_tab[0]+ i;
 
-     double r = std::sqrt( (x[i]-xinit)*(x[i]-xinit) + (y[j]-yinit)*(y[j]-yinit) );
-     T0[l] =300+ 10 * std::exp(-r/0.2);
-  }
+      double r = std::sqrt( (x[i]-xinit)*(x[i]-xinit) + (y[j]-yinit)*(y[j]-yinit) );
+      T0[l] =300+ 10 * std::exp(-r/0.2);
+    }
   }
 }
 
@@ -73,13 +72,13 @@ void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* d
 ////
 void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt )
 {
- for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ){ 
-  for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ){ 
+  for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ){ 
+    for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ){ 
     
-     int    l = j*ndim_tab[0]+ i;
+      int    l = j*ndim_tab[0]+ i;
  
-     T1[l]    = T0[l] - dt*bilan[l]; 
-   }
+      T1[l]    = T0[l] - dt*bilan[l]; 
+    }
   }
 }
 
@@ -98,29 +97,29 @@ void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a
   {
     for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
       for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
+        
+        int    l = j*ndim_tab[0]+ i;// (i  , j  )
+        int    l1= l+1;              // (i+1, j  )
+        int    l2= l-1;              // (i-1, j  )
+        int    l3= l-2;              // (i-2, j  )
+        int    l4= l+2;              // (i+2, j  )
 
-         int    l = j*ndim_tab[0]+ i;// (i  , j  )
-         int    l1= l+1;              // (i+1, j  )
-         int    l2= l-1;              // (i-1, j  )
-         int    l3= l-2;              // (i-2, j  )
-         int    l4= l+2;              // (i+2, j  )
+        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-         double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-         double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+        bilan[l] = a[0]*(fp-fm)/(2.*dx[0]); 
 
-         bilan[l] = a[0]*(fp-fm)/(2.*dx[0]); 
+        l1= l+ndim_tab[0];     // (i  , j+1)
+        l2= l-ndim_tab[0];     // (i  , j-1)
+        l3= l-2*ndim_tab[0];   // (i  , j+2)
+        l4= l+2*ndim_tab[0];   // (i  , j-2)
 
-         l1= l+ndim_tab[0];     // (i  , j+1)
-         l2= l-ndim_tab[0];     // (i  , j-1)
-         l3= l-2*ndim_tab[0];   // (i  , j+2)
-         l4= l+2*ndim_tab[0];   // (i  , j-2)
+        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-         fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-         fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-         bilan[l] += a[1]*(fp-fm)/(2.*dx[1]); 
-     }
-   }
+        bilan[l] += a[1]*(fp-fm)/(2.*dx[1]); 
+      }
+    }
   }
   // 2eme sous pas schema Heun
   else
@@ -128,45 +127,92 @@ void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a
     for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
       for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
 
-         int    l = j*ndim_tab[0]+ i;// (i  , j  )
-         int    l1= l+1;              // (i+1, j  )
-         int    l2= l-1;              // (i-1, j  )
-         int    l3= l-2;              // (i-2, j  )
-         int    l4= l+2;              // (i+2, j  )
+        int    l = j*ndim_tab[0]+ i;// (i  , j  )
+        int    l1= l+1;              // (i+1, j  )
+        int    l2= l-1;              // (i-1, j  )
+        int    l3= l-2;              // (i-2, j  )
+        int    l4= l+2;              // (i+2, j  )
 
-         double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-         double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-         bilan[l] = 0.5*( bilan[l] + a[0]*(fp-fm)/(2.*dx[0])) ;
+        bilan[l] = 0.5*( bilan[l] + a[0]*(fp-fm)/(2.*dx[0])) ;
 
-         l1= l+ndim_tab[0];     // (i  , j+1)
-         l2= l-ndim_tab[0];     // (i  , j-1)
-         l3= l-2*ndim_tab[0];   // (i  , j+2)
-         l4= l+2*ndim_tab[0];   // (i  , j-2)
+        l1= l+ndim_tab[0];     // (i  , j+1)
+        l2= l-ndim_tab[0];     // (i  , j-1)
+        l3= l-2*ndim_tab[0];   // (i  , j+2)
+        l4= l+2*ndim_tab[0];   // (i  , j-2)
 
-         fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-         fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-         bilan[l] += (a[1]*(fp-fm)/(2.*dx[1]))*0.5; 
-     }
-   }
+        bilan[l] += (a[1]*(fp-fm)/(2.*dx[1]))*0.5; 
+      }
+    }
   }
 }
 
 void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx, const double mu )
 {
-    for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
-      for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
-
-         int    l = j*ndim_tab[0]+ i;// (i  , j  )
-         int    l1= l+1;              // (i+1, j  )
-         int    l2= l-1;              // (i-1, j  )
-         int    l3= l+ndim_tab[0];   // (i  , j+1)
-         int    l4= l-ndim_tab[0];   // (i  , j-1)
-         bilan[l] = bilan[l] - mu*(  (T[l1]+T[l2]-2*T[l])/(dx[0]*dx[0]) +  (T[l3]+T[l4]-2*T[l])/(dx[1]*dx[1]) ) ;
-      }
+  for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
+    for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
+      
+      int    l = j*ndim_tab[0]+ i;// (i  , j  )
+      int    l1= l+1;              // (i+1, j  )
+      int    l2= l-1;              // (i-1, j  )
+      int    l3= l+ndim_tab[0];   // (i  , j+1)
+      int    l4= l-ndim_tab[0];   // (i  , j-1)
+      bilan[l] = bilan[l] - mu*(  (T[l1]+T[l2]-2*T[l])/(dx[0]*dx[0]) +  (T[l3]+T[l4]-2*T[l])/(dx[1]*dx[1]) ) ;
     }
+  }
 }
+
+
+////
+//// condition_limite
+////
+void condition_limite(int* ndim_tab, double* T, int nfic) {
+  for (int64_t ific = 0; ific < nfic ; ++ific )
+  {  
+    //periodicite en Jmax et Jmin
+    for (int64_t i = 0; i < ndim_tab[0]  ; ++i )
+    {  
+      //Jmin
+      int l0   = ific*ndim_tab[0] +i;
+      int l1   = ndim_tab[0]*(ndim_tab[1]-2*nfic +ific) +i;
+
+      T[l0] = T[l1];
+
+      //Jmax
+      l0   = ndim_tab[0]*(ndim_tab[1]-nfic +ific) +i;
+      l1   = ndim_tab[0]*(nfic +ific) +i;
+
+      T[l0] = T[l1];
+    }
+  }
+
+  for (int64_t ific = 0; ific < nfic ; ++ific )
+  { 
+    //periodicité en Imax et Imin
+    for (int64_t j = 0; j < ndim_tab[1]  ; ++j )
+    {  
+      //Imin
+      int l0   = ific +j*ndim_tab[0]; 
+      int l1   = l0 + ndim_tab[0] - 2*nfic;
+
+      T[l0] = T[l1];
+
+      //Imax
+      l0   = ific + (j+1)*ndim_tab[0] - nfic;
+      l1   = l0 - ndim_tab[0] + 2*nfic;
+
+      T[l0] = T[l1];
+    }
+  }
+
+}
+
+
 
 int main( int nargc, char* argv[])
 {
@@ -204,10 +250,10 @@ int main( int nargc, char* argv[])
 
   for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
     for (int64_t i = 0; i < Ndim_tab[0] ; ++i ){ 
-
-    int    l = j*Ndim_tab[0]+ i;
-    fprintf(out, " Init: %f %f %f   \n", x[i],y[j], T0[l]); 
-   }
+      
+      int    l = j*Ndim_tab[0]+ i;
+      fprintf(out, " Init: %f %f %f   \n", x[i],y[j], T0[l]); 
+    }
     fprintf(out, " Init: \n"); 
   }
 
@@ -230,66 +276,29 @@ int main( int nargc, char* argv[])
     double *Tout;
     double *Tbilan;
     for (int64_t step = 0; step < Stepmax ; ++step )
-    { 
-       //mise a jour point courant
-       if(step==0) { Tin = T0; Tout= T1; Tbilan= T0;}
-       else        { Tin = T0; Tout= T0; Tbilan= T1;}
+    {
+      //mise a jour point courant
+      if(step==0) { Tin = T0; Tout= T1; Tbilan= T0;}
+      else        { Tin = T0; Tout= T0; Tbilan= T1;}
 
-       //advection
-       advection(Ndim_tab, Tbilan, bilan,  dx, U , step);
+      //advection
+      advection(Ndim_tab, Tbilan, bilan,  dx, U , step);
 
-       diffusion(Ndim_tab, Tbilan, bilan,  dx, mu);
-       mise_a_jour(Ndim_tab, Tin, Tout, bilan,  dt);
+      diffusion(Ndim_tab, Tbilan, bilan,  dx, mu);
+      mise_a_jour(Ndim_tab, Tin, Tout, bilan,  dt);
 
       //Application Condition limite
-      for (int64_t ific = 0; ific < nfic ; ++ific )
-      {  
-          //periodicité en Jmax et Jmin
-          for (int64_t i = 0; i < Ndim_tab[0]  ; ++i )
-          {  
-           //Jmin
-           int l0   = ific*Ndim_tab[0] +i;
- 
-           int l1   = Ndim_tab[0]*(Ndim_tab[1]-2*nfic +ific) +i;
+      condition_limite(Ndim_tab, Tout, nfic);     
 
-           Tout[l0] = Tout[l1];
-
-           //Jmax
-           l0   = Ndim_tab[0]*(Ndim_tab[1]-nfic +ific) +i;
-           l1   = Ndim_tab[0]*(nfic +ific) +i;
-
-           Tout[l0] = Tout[l1];
-          }
-      }
-
-      for (int64_t ific = 0; ific < nfic ; ++ific )
-      { 
-          //periodicité en Imax et Imin
-          for (int64_t j = 0; j < Ndim_tab[1]  ; ++j )
-          {  
-           //Imin
-           int l0   = ific +j*Ndim_tab[0]; 
-           int l1   = l0 + Ndim_tab[0] - 2*nfic;
-
-           Tout[l0] = Tout[l1];
-
-           //Imax
-           l0   = ific + (j+1)*Ndim_tab[0] - nfic;
-           l1   = l0 - Ndim_tab[0] + 2*nfic;
-
-           Tout[l0] = Tout[l1];
-          }
-      }
-
-     }  // Nstepmax
-    }  // Nitmax
+    }  // Nstepmax
+  }  // Nitmax
 
   for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
     for (int64_t i = 0; i < Ndim_tab[0] ; ++i ){ 
 
-    int    l = j*Ndim_tab[0]+ i;
-    fprintf(out, " Final %f %f %f  \n", x[i],y[j], T0[l]); 
-   }
+      int    l = j*Ndim_tab[0]+ i;
+      fprintf(out, " Final %f %f %f  \n", x[i],y[j], T0[l]); 
+    }
     fprintf(out, " Final \n"); 
   }
 
