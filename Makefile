@@ -240,10 +240,14 @@ clean:
 	rm -f advectiondiffusion advectiondiffusion.o
 clobber: clean
 
-seq : advectiondiffusion_seq.exe
+#seq : advectiondiffusion_seq.exe
+#CFLAGS = -Wall -fPIC -O2 -mtune=native -fopenmp
 
-advectiondiffusion_seq.exe : advectiondiffusion_seq.o
-    mpic++ -Wall -fPIC -O2 -mtune=native -fopenmp -o advectiondiffusion_seq.exe advectiondiffusion_seq.o $(LIBRARIES)
+#advectiondiffusion_seq.exe : advectiondiffusion_seq.o
+#    mpic++ $(CFLAGS) -o advectiondiffusion_seq.exe advectiondiffusion_seq.o $(LIBRARIES)
 
-advectiondiffusion_seq.o : advectiondiffusion_seq.cpp
-    mpic++ -Wall -fPIC -O2 -mtune=native -fopenmp -c advectiondiffusion_seq.cpp -o advectiondiffusion_seq.o
+#advectiondiffusion_seq.o : advectiondiffusion_seq.cpp
+#    mpic++ $(CFLAGS) -c advectiondiffusion_seq.cpp -o advectiondiffusion_seq.o
+
+
+
