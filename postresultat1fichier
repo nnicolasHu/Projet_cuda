@@ -1,0 +1,15 @@
+#!/bin/ksh
+cp vide.txt res.txt
+for i
+do
+echo $i
+grep Final $i >  tmp1_$i
+cat tmp1_$i | sed "s/Final// "> res_$i
+cat res.txt res_$i > tmp1_$i
+mv  tmp1_$i res.txt
+rm -f tmp1_$i
+done
+grep Tmoy Sortie00000.txt >  tmp
+cat tmp | sed "s/Tmoy// "> tmoy.txt
+rm tmp
+
