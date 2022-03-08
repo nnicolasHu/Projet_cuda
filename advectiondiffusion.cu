@@ -22,9 +22,6 @@
 void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* dx );
 double *InitGPUVector(long int N);
 
-void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt );
-void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  );
-void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx, const double mu );
 void condition_limite(int* ndim_tab, double* T, int nfic);
 
 
@@ -188,107 +185,6 @@ void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* d
 }
 
 
-
-
-////
-//// mise a jour
-////
-void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt )
-{
-  for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ){ 
-    for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ){ 
-    
-      int    l = j*ndim_tab[0]+ i;
- 
-      T1[l]    = T0[l] - dt*bilan[l]; 
-    }
-  }
-}
-
-
-////
-//// advection
-////
-void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  )
-{
-
-  double c1 = 7./6.;
-  double c2 = 1./6.;
-  // printf("dx %0.9f %0.9f \n", dx, a*dt ); 
-  // 1er sous pas schema Heun
-  if(step==0)
-  {
-    for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
-      for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
-        
-        int    l = j*ndim_tab[0]+ i;// (i  , j  )
-        int    l1= l+1;              // (i+1, j  )
-        int    l2= l-1;              // (i-1, j  )
-        int    l3= l-2;              // (i-2, j  )
-        int    l4= l+2;              // (i+2, j  )
-
-        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] = a[0]*(fp-fm)/(2.*dx[0]); 
-
-        l1= l+ndim_tab[0];     // (i  , j+1)
-        l2= l-ndim_tab[0];     // (i  , j-1)
-        l3= l-2*ndim_tab[0];   // (i  , j+2)
-        l4= l+2*ndim_tab[0];   // (i  , j-2)
-
-        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] += a[1]*(fp-fm)/(2.*dx[1]); 
-      }
-    }
-  }
-  // 2eme sous pas schema Heun
-  else
-  {
-    for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
-      for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
-
-        int    l = j*ndim_tab[0]+ i;// (i  , j  )
-        int    l1= l+1;              // (i+1, j  )
-        int    l2= l-1;              // (i-1, j  )
-        int    l3= l-2;              // (i-2, j  )
-        int    l4= l+2;              // (i+2, j  )
-
-        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] = 0.5*( bilan[l] + a[0]*(fp-fm)/(2.*dx[0])) ;
-
-        l1= l+ndim_tab[0];     // (i  , j+1)
-        l2= l-ndim_tab[0];     // (i  , j-1)
-        l3= l-2*ndim_tab[0];   // (i  , j+2)
-        l4= l+2*ndim_tab[0];   // (i  , j-2)
-
-        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] += (a[1]*(fp-fm)/(2.*dx[1]))*0.5; 
-      }
-    }
-  }
-}
-
-void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx, const double mu )
-{
-  for (int64_t j = 2; j < ndim_tab[1]-2 ; ++j ) {
-    for (int64_t i = 2; i < ndim_tab[0]-2 ; ++i ) { 
-      
-      int    l = j*ndim_tab[0]+ i;// (i  , j  )
-      int    l1= l+1;              // (i+1, j  )
-      int    l2= l-1;              // (i-1, j  )
-      int    l3= l+ndim_tab[0];   // (i  , j+1)
-      int    l4= l-ndim_tab[0];   // (i  , j-1)
-      bilan[l] = bilan[l] - mu*(  (T[l1]+T[l2]-2*T[l])/(dx[0]*dx[0]) +  (T[l3]+T[l4]-2*T[l])/(dx[1]*dx[1]) ) ;
-    }
-  }
-}
 
 
 ////
