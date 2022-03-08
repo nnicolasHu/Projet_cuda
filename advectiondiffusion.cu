@@ -22,7 +22,7 @@
 void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* dx );
 double *InitGPUVector(long int N);
 
-void condition_limite(int* ndim_tab, double* T, int nfic);
+//void condition_limite(int* ndim_tab, double* T, int nfic);
 
 
 __global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt );
@@ -67,7 +67,10 @@ int main( int nargc, char* argv[])
   
   double dx[2];
   /* 1- Generation des donnees sur le CPU (host)*/
+  startTime=walltime(&clockZero);
   init( Ndim_tab, dim, T0, x, y, dx);
+  elapsedTime=walltime(&startTime);
+  printf("Time to generate datas at T=0 : %6.4f(ms)\n", elapsedTime*1000);
   fprintf(out, "dim blocX =  %d, dim blocY =  %d, dx= %f, dy= %f \n",Ndim_tab[0], Ndim_tab[1],  dx[0], dx[1] );
 
   for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
@@ -88,40 +91,12 @@ int main( int nargc, char* argv[])
 
 
   /* 2-b) Transfert sur GPU */
+  err = cudaMemcpy(T0_GPU, T0, Ndim_tab[0]*Ndim_tab[1], cudaMemcpyHostToDevice);
+  if (err != cudaSuccess){
+    fprintf(stderr, "Failed to copy vector T0 from host to device T0_GPU (error code %s)!\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
 
-  const double dt =0.005;  // pas de temps
-  double U[2];
-  U[0]  =1.;      // vitesse advection
-  U[1]  =1.;
- 
-  const double mu =0.0005;   // coeff diffusion
-  int Nitmax      =2000;
-  int Stepmax     = 2;
-
-  //Boucle en temps
-  for (int64_t nit = 0; nit < Nitmax ; ++nit )
-  { 
-    //Boucle Runge-Kutta
-    double *Tin;
-    double *Tout;
-    double *Tbilan;
-    for (int64_t step = 0; step < Stepmax ; ++step )
-    {
-      //mise a jour point courant
-      if(step==0) { Tin = T0; Tout= T1; Tbilan= T0;}
-      else        { Tin = T0; Tout= T0; Tbilan= T1;}
-
-      //advection
-      advection(Ndim_tab, Tbilan, bilan,  dx, U , step);
-
-      diffusion(Ndim_tab, Tbilan, bilan,  dx, mu);
-      mise_a_jour(Ndim_tab, Tin, Tout, bilan,  dt);
-
-      //Application Condition limite
-      condition_limite(Ndim_tab, Tout, nfic);     
-
-    }  // Nstepmax
-  }  // Nitmax
 
   for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
     for (int64_t i = 0; i < Ndim_tab[0] ; ++i ){ 
@@ -134,7 +109,11 @@ int main( int nargc, char* argv[])
 
   fclose(out);
 
-  delete [] T0;  delete [] T1; delete [] bilan; delete [] x;
+  /* 6- Nettoyage */
+
+  delete [] T0;  delete [] T1; delete [] bilan; delete [] x, delete [] y;
+  cudaFree(bilan_GPU);cudaFree(T1_GPU);cudaFree(T0_GPU);
+  cudaDeviceReset();
 
   return EXIT_SUCCESS;
 }
@@ -186,7 +165,7 @@ void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* d
 
 
 
-
+/*
 ////
 //// condition_limite
 ////
@@ -232,7 +211,7 @@ void condition_limite(int* ndim_tab, double* T, int nfic) {
 }
 
 
-
+*/
 
 
 
@@ -265,7 +244,11 @@ __global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bi
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i>1 || i<ndim_tab[0]-2) {
-      int l;for (int j=2; j<ndim_tab[1]-2; ++j) {  = T0[l] - dt*bilan[l];
+
+      int l;
+      for (int j=2; j<ndim_tab[1]-2; ++j) {
+        l = j*ndim_tab[0]+ i;
+        T1[l]    = T0[l] - dt*bilan[l]; 
       }
     }
 }
@@ -412,6 +395,38 @@ __global__ void condition_limite(int* ndim_tab, double* T, int nfic) {
 
 
 
+/*
+  const double dt =0.005;  // pas de temps
+  double U[2];
+  U[0]  =1.;      // vitesse advection
+  U[1]  =1.;
+ 
+  const double mu =0.0005;   // coeff diffusion
+  int Nitmax      =2000;
+  int Stepmax     = 2;
 
+  //Boucle en temps
+  for (int64_t nit = 0; nit < Nitmax ; ++nit )
+  { 
+    //Boucle Runge-Kutta
+    double *Tin;
+    double *Tout;
+    double *Tbilan;
+    for (int64_t step = 0; step < Stepmax ; ++step )
+    {
+      //mise a jour point courant
+      if(step==0) { Tin = T0; Tout= T1; Tbilan= T0;}
+      else        { Tin = T0; Tout= T0; Tbilan= T1;}
 
+      //advection
+      advection(Ndim_tab, Tbilan, bilan,  dx, U , step);
 
+      diffusion(Ndim_tab, Tbilan, bilan,  dx, mu);
+      mise_a_jour(Ndim_tab, Tin, Tout, bilan,  dt);
+
+      //Application Condition limite
+      condition_limite(Ndim_tab, Tout, nfic);     
+
+    }  // Nstepmax
+  }  // Nitmax
+*/

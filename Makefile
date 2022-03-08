@@ -228,16 +228,19 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-advectiondiffusion.o:advectiondiffusion.cu
+advectiondiffusion.o: advectiondiffusion.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-advectiondiffusion: advectiondiffusion.o
+walltime.o: walltime.c
+	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+
+advectiondiffusion: advectiondiffusion.o walltime.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 
 run: build
 	$(EXEC) ./advectiondiffusion
 clean:
-	rm -f advectiondiffusion advectiondiffusion.o
+	rm -f *.o advectiondiffusion Sortie.txt
 clobber: clean
 
 #seq : advectiondiffusion_seq.exe
