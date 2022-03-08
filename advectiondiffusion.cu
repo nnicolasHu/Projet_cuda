@@ -20,6 +20,7 @@
 
 
 void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* dx );
+double *InitGPUVector(long int N);
 
 void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt );
 void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  );
@@ -41,9 +42,13 @@ int main( int nargc, char* argv[])
   int dim[2]; dim[0] = 500; dim[1]=500;
   int nfic     =  2;
 
+  // Comment on gère les fichiers de sorties?
   sprintf(fileName, "Sortie.txt");
   out = fopen(fileName, "w");
- 
+
+  double startTime,elapsedTime;
+  double clockZero =0.;
+  cudaError_t err = cudaSuccess;
 
   //
   //
@@ -54,8 +59,9 @@ int main( int nargc, char* argv[])
   Ndim_tab[0] = dim[0]+2*nfic; 
   Ndim_tab[1] = dim[1]+2*nfic;  
 
-
+  
   double *x,*y, *T1, *T0,  *bilan;
+  double *T1_GPU, *T0_GPU, *bilan_GPU;
   x       = new double[Ndim_tab[0]];
   y       = new double[Ndim_tab[1]];
   bilan   = new double[Ndim_tab[0]*Ndim_tab[1]]; 
@@ -63,7 +69,7 @@ int main( int nargc, char* argv[])
   T0      = new double[Ndim_tab[0]*Ndim_tab[1]]; 
   
   double dx[2];
-
+  /* 1- Generation des donnees sur le CPU (host)*/
   init( Ndim_tab, dim, T0, x, y, dx);
   fprintf(out, "dim blocX =  %d, dim blocY =  %d, dx= %f, dy= %f \n",Ndim_tab[0], Ndim_tab[1],  dx[0], dx[1] );
 
@@ -76,7 +82,15 @@ int main( int nargc, char* argv[])
     fprintf(out, " Init: \n"); 
   }
 
+  /* 2- Transfert CPU (host) vers GPU (device)*/
+  /* 2-a) Allocation memoire sur GPU */
+  cudaDeviceSynchronize();
+  bilan_GPU = InitGPUVector(Ndim_tab[0]*Ndim_tab[1]);
+  T1_GPU = InitGPUVector(Ndim_tab[0]*Ndim_tab[1]);
+  T0_GPU = InitGPUVector(Ndim_tab[0]*Ndim_tab[1]);
 
+
+  /* 2-b) Transfert sur GPU */
 
   const double dt =0.005;  // pas de temps
   double U[2];
@@ -128,6 +142,19 @@ int main( int nargc, char* argv[])
   return EXIT_SUCCESS;
 }
 
+
+
+double *InitGPUVector(long int N){
+  cudaError_t err = cudaSuccess;
+  double *d_x;
+  err=cudaMalloc((void **)&d_x, N*sizeof(double));
+  if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate device vector (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+  return d_x;
+}
 
 
 
@@ -338,15 +365,12 @@ void condition_limite(int* ndim_tab, double* T, int nfic) {
 ////
 __global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt )
 {
-    //On récupère les coordonnées du point à traiter.
+    //On récupère les coordonnées de la colonne à traiter.
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    // Numérotation globale
-    int    l = j*ndim_tab[0]+ i;
-
-    if(i >= 2 && i < ndim_tab[0] - 2 && j >= 2 && j < ndim_tab[1]){
-        T1[l]    = T0[l] - dt*bilan[l]; 
+    if (i>1 || i<ndim_tab[0]-2) {
+      int l;for (int j=2; j<ndim_tab[1]-2; ++j) {  = T0[l] - dt*bilan[l];
+      }
     }
 }
 
@@ -354,81 +378,89 @@ __global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bi
 ////
 //// advection
 ////
-__global__ void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  )
-{
+__global__ void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  ) {
 
+  //On récupère les coordonnées de la colonne à traiter.
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (i>1 || i<ndim_tab[0]-2) {
     double c1 = 7./6.;
     double c2 = 1./6.;
-    // printf("dx %0.9f %0.9f \n", dx, a*dt ); 
+    // printf("dx %0.9f %0.9f \n", dx, a*dt );
 
-    //On récupère les coordonnées du point à traiter.
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int l, l1, l2, l3, l4;
 
     // 1er sous pas schema Heun
-    if(step==0){
+    if (step==0) {
+      for (int j=2; j<ndim_tab[1]-2; ++j) {
+        l = j*ndim_tab[0]+ i; // (i  , j  )
+        l1= l+1;              // (i+1, j  )
+        l2= l-1;              // (i-1, j  )
+        l3= l-2;              // (i-2, j  )
+        l4= l+2;              // (i+2, j  )
 
-        if(i >= 2 && i < ndim_tab[0] - 2 && j >= 2 && j < ndim_tab[1]){
-            int    l = j*ndim_tab[0]+ i;// (i  , j  )
-            int    l1= l+1;              // (i+1, j  )
-            int    l2= l-1;              // (i-1, j  )
-            int    l3= l-2;              // (i-2, j  )
-            int    l4= l+2;              // (i+2, j  )
+        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-            double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-            double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+        bilan[l] = a[0]*(fp-fm)/(2.*dx[0]); 
 
-            bilan[l] = a[0]*(fp-fm)/(2.*dx[0]); 
+        l1= l+ndim_tab[0];     // (i  , j+1)
+        l2= l-ndim_tab[0];     // (i  , j-1)
+        l3= l-2*ndim_tab[0];   // (i  , j+2)
+        l4= l+2*ndim_tab[0];   // (i  , j-2)
 
-            l1= l+ndim_tab[0];     // (i  , j+1)
-            l2= l-ndim_tab[0];     // (i  , j-1)
-            l3= l-2*ndim_tab[0];   // (i  , j+2)
-            l4= l+2*ndim_tab[0];   // (i  , j-2)
+        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-            fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-            fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-            bilan[l] += a[1]*(fp-fm)/(2.*dx[1]); 
-        }
+        bilan[l] += a[1]*(fp-fm)/(2.*dx[1]); 
+      }
     }
+
     // 2eme sous pas schema Heun
-    else{
-        if(i >= 2 && i < ndim_tab[0] - 2 && j >= 2 && j < ndim_tab[1]){
+    else {
+      for (int j=2; j<ndim_tab[1]-2; ++j) {
+        l = j*ndim_tab[0]+ i; // (i  , j  )
+        l1= l+1;              // (i+1, j  )
+        l2= l-1;              // (i-1, j  )
+        l3= l-2;              // (i-2, j  )
+        l4= l+2;              // (i+2, j  )
 
-            int    l = j*ndim_tab[0]+ i;// (i  , j  )
-            int    l1= l+1;              // (i+1, j  )
-            int    l2= l-1;              // (i-1, j  )
-            int    l3= l-2;              // (i-2, j  )
-            int    l4= l+2;              // (i+2, j  )
-__global__ void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx, const double mu )
-            l1= l+ndim_tab[0];     // (i  , j+1)
-            l2= l-ndim_tab[0];     // (i  , j-1)
-            l3= l-2*ndim_tab[0];   // (i  , j+2)
-            l4= l+2*ndim_tab[0];   // (i  , j-2)
+        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-            fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-            fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+        bilan[l] = 0.5*( bilan[l] + a[0]*(fp-fm)/(2.*dx[0])) ;
 
-            bilan[l] += (a[1]*(fp-fm)/(2.*dx[1]))*0.5;
-        }
+        l1= l+ndim_tab[0];     // (i  , j+1)
+        l2= l-ndim_tab[0];     // (i  , j-1)
+        l3= l-2*ndim_tab[0];   // (i  , j+2)
+        l4= l+2*ndim_tab[0];   // (i  , j-2)
+
+        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+
+        bilan[l] += (a[1]*(fp-fm)/(2.*dx[1]))*0.5; 
+
+      }
     }
+
+  }
 }
 
 __global__ void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx, const double mu )
 {
-    //On récupère les coordonnées du point à traiter.
+    //On récupère les coordonnées de la colonne à traiter.
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
-  
-    if(i >= 2 && i < ndim_tab[0] - 2 && j >= 2 && j < ndim_tab[1]){
 
+    if (i>1 || i<ndim_tab[0]-2) {
+      for (int j=2; j<ndim_tab[1]-2; ++j) {
         int    l = j*ndim_tab[0]+ i;// (i  , j  )
         int    l1= l+1;              // (i+1, j  )
         int    l2= l-1;              // (i-1, j  )
         int    l3= l+ndim_tab[0];   // (i  , j+1)
         int    l4= l-ndim_tab[0];   // (i  , j-1)
+        bilan[l] = bilan[l] - mu*(  (T[l1]+T[l2]-2*T[l])/(dx[0]*dx[0]) +  (T[l3]+T[l4]-2*T[l])/(dx[1]*dx[1]) ) ;
+      }
 
-        bilan[l] = bilan[l] - mu*(  (T[l1]+T[l2]-2*T[l])/(dx[0]*dx[0]) +  (T[l3]+T[l4]-2*T[l])/(dx[1]*dx[1]) );
     }
 }
 
