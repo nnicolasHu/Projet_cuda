@@ -9,7 +9,7 @@ cat res.txt res_$i > tmp1_$i
 mv  tmp1_$i res.txt
 rm -f tmp1_$i
 done
-grep Tmoy Sortie00000.txt >  tmp
+grep Tmoy Sortie.txt >  tmp
 cat tmp | sed "s/Tmoy// "> tmoy.txt
 rm tmp
 
