@@ -19,14 +19,14 @@
 #include "walltime.c"
 
 
-void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* dx );
+void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy);
 double *InitGPUVector(long int N);
 
 //void condition_limite(int* ndim_tab, double* T, int nfic);
 
 
-__global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt );
-__global__ void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  );
+__global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt, int step);
+__global__ void advection( int* ndim_tab,   double* T, double* bilan, double* dxy, double* a, int step  );
 __global__ void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx, const double mu );
 __global__ void condition_limite(int* ndim_tab, double* T, int nfic);
 
@@ -39,7 +39,6 @@ int main( int nargc, char* argv[])
   int dim[2]; dim[0] = 500; dim[1]=500;
   int nfic     =  2;
 
-  // Comment on gère les fichiers de sorties?
   sprintf(fileName, "Sortie.txt");
   out = fopen(fileName, "w");
 
@@ -56,31 +55,35 @@ int main( int nargc, char* argv[])
   Ndim_tab[0] = dim[0]+2*nfic; 
   Ndim_tab[1] = dim[1]+2*nfic;  
 
-  
-  double *x,*y, *T1, *T0,  *bilan;
   double *T1_GPU, *T0_GPU, *bilan_GPU;
+  double *x,*y, *T0;
   x       = new double[Ndim_tab[0]];
   y       = new double[Ndim_tab[1]];
-  bilan   = new double[Ndim_tab[0]*Ndim_tab[1]]; 
-  T1      = new double[Ndim_tab[0]*Ndim_tab[1]]; 
   T0      = new double[Ndim_tab[0]*Ndim_tab[1]]; 
   
-  double dx[2];
+  double lx =10;
+  double ly =10;
+  double dxy[2];
+  dxy[0] = lx/ dim[0];
+  dxy[1] = ly/ dim[1];
+
   /* 1- Generation des donnees sur le CPU (host)*/
   startTime=walltime(&clockZero);
-  init( Ndim_tab, dim, T0, x, y, dx);
+  init( Ndim_tab, T0, x, y, dxy);
   elapsedTime=walltime(&startTime);
   printf("Time to generate datas at T=0 : %6.4f(ms)\n", elapsedTime*1000);
-  fprintf(out, "dim blocX =  %d, dim blocY =  %d, dx= %f, dy= %f \n",Ndim_tab[0], Ndim_tab[1],  dx[0], dx[1] );
 
-  for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
-    for (int64_t i = 0; i < Ndim_tab[0] ; ++i ){ 
-      
-      int    l = j*Ndim_tab[0]+ i;
+  fprintf(out, "dim blocX =  %d, dim blocY =  %d, dx= %f, dy= %f \n",Ndim_tab[0], Ndim_tab[1],  dxy[0], dxy[1] );
+
+  for (int64_t i = 0; i < Ndim_tab[0] ; ++i ){ 
+    for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
+      int l = j*Ndim_tab[0]+ i;
       fprintf(out, " Init: %f %f %f   \n", x[i],y[j], T0[l]); 
     }
     fprintf(out, " Init: \n"); 
   }
+  elapsedTime=walltime(&startTime);
+  printf("Time to write initial condition in Sortie.txt : %6.4f(ms)\n", elapsedTime*1000);
 
   /* 2- Transfert CPU (host) vers GPU (device)*/
   /* 2-a) Allocation memoire sur GPU */
@@ -96,11 +99,91 @@ int main( int nargc, char* argv[])
     fprintf(stderr, "Failed to copy vector T0 from host to device T0_GPU (error code %s)!\n", cudaGetErrorString(err));
     exit(EXIT_FAILURE);
   }
+  cudaDeviceSynchronize();
+  elapsedTime=walltime(&startTime);
+  printf("Time for transfert CPU->GPU : %6.4f(ms)\n", elapsedTime*1000);
+
+  /* 3- Calcul sur GPU*/
+  const double dt =0.004;  // pas de temps
+  double U[2];
+  U[0]  =1.;      // vitesse advection suivant axe X
+  U[1]  =1.;      // vitesse advection suivant axe Y
+
+ 
+  const double mu =0.0005;   // coeff diffusion
+  //int Nitmax      =1250;   // temps final = 5s
+  int Nitmax      =1875;     // temps final = 7.5s
+  int Stepmax     = 2;       //schema  RK2
+
+  int threadsPerBlock = 32;
+  int blocksPerGrid =(Ndim_tab[0] + threadsPerBlock - 1) / threadsPerBlock;
+
+  //Boucle en temps
+  for (int64_t nit = 0; nit < Nitmax ; ++nit )
+  { 
+    //Boucle Runge-Kutta
+    double *Tin;
+    double *Tout;
+    double *Tbilan;
+    for (int64_t step = 0; step < Stepmax ; ++step )
+    { 
+
+      if(step==0) { Tin = T0_GPU; Tout= T1_GPU; Tbilan=T0_GPU; }
+      else        { Tin = T0_GPU; Tout= T0_GPU; Tbilan=T1_GPU;}
+
+      //advection
+      advection<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tbilan, bilan_GPU,  dxy, U , step);
+      cudaDeviceSynchronize();
+      err = cudaGetLastError();
+      if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to launch advection kernel à la boucle %d, step %d (error code %s)!\n",nit, step, cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+      }
+
+      diffusion<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tbilan, bilan_GPU,  dxy, mu);
+      cudaDeviceSynchronize();
+      err = cudaGetLastError();
+      if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to launch diffusion kernel (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+      }
+
+      mise_a_jour<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tin, Tout, bilan_GPU,  dt, step);
+      cudaDeviceSynchronize();
+      err = cudaGetLastError();
+      if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to launch mise_a_jour kernel (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+      }
+
+      //Application Condition limite
+      condition_limite<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tout, nfic);
+      cudaDeviceSynchronize();
+      err = cudaGetLastError();
+      if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to launch condition_limite kernel (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+      }
+    }  // Nstepmax
+  }  // Nitmax
+
+  elapsedTime=walltime(&startTime);
+  printf("Time for GPU calculus : %6.4f(ms)\n", elapsedTime*1000);
+
+  /* 4- Transfert GPU (device) vers CPU (host)*/
+  err = cudaMemcpy(T0, T0_GPU, Ndim_tab[0]*Ndim_tab[1], cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+  elapsedTime=walltime(&startTime);
+  if (err != cudaSuccess){
+    fprintf(stderr, "Failed to copy vector T0_GPU from device to host (error code %s)!\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+  printf("Time for transfert GPU->CPU : %6.4f(ms)\n", elapsedTime*1000);
 
 
-  for (int64_t j = 0; j < Ndim_tab[1] ; ++j ){ 
-    for (int64_t i = 0; i < Ndim_tab[0] ; ++i ){ 
-
+  for (int64_t i = nfic; i < Ndim_tab[0]-nfic ; ++i ){ 
+    for (int64_t j = nfic; j < Ndim_tab[1]-nfic ; ++j ){ 
+      
       int    l = j*Ndim_tab[0]+ i;
       fprintf(out, " Final %f %f %f  \n", x[i],y[j], T0[l]); 
     }
@@ -110,8 +193,7 @@ int main( int nargc, char* argv[])
   fclose(out);
 
   /* 6- Nettoyage */
-
-  delete [] T0;  delete [] T1; delete [] bilan; delete [] x, delete [] y;
+  delete [] T0; delete [] x, delete [] y;
   cudaFree(bilan_GPU);cudaFree(T1_GPU);cudaFree(T0_GPU);
   cudaDeviceReset();
 
@@ -137,24 +219,18 @@ double *InitGPUVector(long int N){
 ////
 //// Init
 ////
-void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* dx )
+void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy)
 {
-  const double lx = 10.;
-  const double ly = 10.;
-
-  dx[0] = lx/dim[0];
-  dx[1] = ly/dim[1];
-
-  const double x0 = 0;
-  const double y0 = 0;
+  const double x0 = 0.;
+  const double y0 = 0.;
   const double xinit = 5;
   const double yinit = 5;
 
   for (int64_t i = 0; i < ndim_tab[0] ; ++i ){
-    x[i] = (i-2)*dx[0] + x0;
+    x[i] = (i-2)*dxy[0] + x0;
     for (int64_t j = 0; j < ndim_tab[1] ; ++j ){
-      y[j] = (j-2)*dx[1] + y0;
-
+      y[j] = (j-2)*dxy[1] + y0;
+      
       int l = j*ndim_tab[0]+ i;
 
       double r = std::sqrt( (x[i]-xinit)*(x[i]-xinit) + (y[j]-yinit)*(y[j]-yinit) );
@@ -162,67 +238,6 @@ void init( int* ndim_tab, int* dim, double* T0, double* x , double* y, double* d
     }
   }
 }
-
-
-
-/*
-////
-//// condition_limite
-////
-void condition_limite(int* ndim_tab, double* T, int nfic) {
-  for (int64_t ific = 0; ific < nfic ; ++ific )
-  {  
-    //periodicite en Jmax et Jmin
-    for (int64_t i = 0; i < ndim_tab[0]  ; ++i )
-    {  
-      //Jmin
-      int l0   = ific*ndim_tab[0] +i;
-      int l1   = ndim_tab[0]*(ndim_tab[1]-2*nfic +ific) +i;
-
-      T[l0] = T[l1];
-
-      //Jmax
-      l0   = ndim_tab[0]*(ndim_tab[1]-nfic +ific) +i;
-      l1   = ndim_tab[0]*(nfic +ific) +i;
-
-      T[l0] = T[l1];
-    }
-  }
-
-  for (int64_t ific = 0; ific < nfic ; ++ific )
-  { 
-    //periodicité en Imax et Imin
-    for (int64_t j = 0; j < ndim_tab[1]  ; ++j )
-    {  
-      //Imin
-      int l0   = ific +j*ndim_tab[0]; 
-      int l1   = l0 + ndim_tab[0] - 2*nfic;
-
-      T[l0] = T[l1];
-
-      //Imax
-      l0   = ific + (j+1)*ndim_tab[0] - nfic;
-      l1   = l0 - ndim_tab[0] + 2*nfic;
-
-      T[l0] = T[l1];
-    }
-  }
-
-}
-
-
-*/
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -238,17 +253,19 @@ void condition_limite(int* ndim_tab, double* T, int nfic) {
 ////
 //// mise a jour
 ////
-__global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt )
+__global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt, int step )
 {
     //On récupère les coordonnées de la colonne à traiter.
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (i>1 || i<ndim_tab[0]-2) {
+    if (i>1 && i<ndim_tab[0]-2) {
+      double cte_rk =0.5;
+      if(step==0) { cte_rk = 1;}
 
       int l;
       for (int j=2; j<ndim_tab[1]-2; ++j) {
         l = j*ndim_tab[0]+ i;
-        T1[l]    = T0[l] - dt*bilan[l]; 
+        T1[l] = T0[l] - dt*cte_rk*bilan[l]; 
       }
     }
 }
@@ -257,69 +274,40 @@ __global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bi
 ////
 //// advection
 ////
-__global__ void advection( int* ndim_tab,   double* T, double* bilan, double* dx, double* a, int step  ) {
+__global__ void advection( int* ndim_tab,   double* T, double* bilan, double* dxy, double* a, int step  ) {
 
   //On récupère les coordonnées de la colonne à traiter.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (i>1 || i<ndim_tab[0]-2) {
+  if (i>1 && i<ndim_tab[0]-2) {
+    double cte_rk =1;
+    if(step==0) { cte_rk = 0;}
+
     double c1 = 7./6.;
     double c2 = 1./6.;
     // printf("dx %0.9f %0.9f \n", dx, a*dt );
 
-    int l, l1, l2, l3, l4;
+    for (int j=2; j<ndim_tab[1]-2; ++j) {
+      int    l = j*ndim_tab[0]+ i;// (i  , j  )
+      int    l1= l+1;              // (i+1, j  )
+      int    l2= l-1;              // (i-1, j  )
+      int    l3= l-2;              // (i-2, j  )
+      int    l4= l+2;              // (i+2, j  )
 
-    // 1er sous pas schema Heun
-    if (step==0) {
-      for (int j=2; j<ndim_tab[1]-2; ++j) {
-        l = j*ndim_tab[0]+ i; // (i  , j  )
-        l1= l+1;              // (i+1, j  )
-        l2= l-1;              // (i-1, j  )
-        l3= l-2;              // (i-2, j  )
-        l4= l+2;              // (i+2, j  )
+      double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+      double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
+      bilan[l] = bilan[l]*cte_rk + a[0]*(fp-fm)/(2.*dxy[0]); 
 
-        bilan[l] = a[0]*(fp-fm)/(2.*dx[0]); 
+      l1= l+ndim_tab[0];     // (i  , j+1)
+      l2= l-ndim_tab[0];     // (i  , j-1)
+      l3= l-2*ndim_tab[0];   // (i  , j-2)
+      l4= l+2*ndim_tab[0];   // (i  , j+2)
 
-        l1= l+ndim_tab[0];     // (i  , j+1)
-        l2= l-ndim_tab[0];     // (i  , j-1)
-        l3= l-2*ndim_tab[0];   // (i  , j+2)
-        l4= l+2*ndim_tab[0];   // (i  , j-2)
+      fm =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
+      fp =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
 
-        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] += a[1]*(fp-fm)/(2.*dx[1]); 
-      }
-    }
-
-    // 2eme sous pas schema Heun
-    else {
-      for (int j=2; j<ndim_tab[1]-2; ++j) {
-        l = j*ndim_tab[0]+ i; // (i  , j  )
-        l1= l+1;              // (i+1, j  )
-        l2= l-1;              // (i-1, j  )
-        l3= l-2;              // (i-2, j  )
-        l4= l+2;              // (i+2, j  )
-
-        double fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        double fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] = 0.5*( bilan[l] + a[0]*(fp-fm)/(2.*dx[0])) ;
-
-        l1= l+ndim_tab[0];     // (i  , j+1)
-        l2= l-ndim_tab[0];     // (i  , j-1)
-        l3= l-2*ndim_tab[0];   // (i  , j+2)
-        l4= l+2*ndim_tab[0];   // (i  , j-2)
-
-        fm   =(T[l ]+T[l2])*c1 - (T[l1]+T[l3])*c2;
-        fp   =(T[l1]+T[l ])*c1 - (T[l4]+T[l2])*c2;
-
-        bilan[l] += (a[1]*(fp-fm)/(2.*dx[1]))*0.5; 
-
-      }
+      bilan[l] += a[1]*(fp-fm)/(2.*dxy[1]); 
     }
 
   }
@@ -330,7 +318,7 @@ __global__ void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx
     //On récupère les coordonnées de la colonne à traiter.
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (i>1 || i<ndim_tab[0]-2) {
+    if (i>1 && i<ndim_tab[0]-2) {
       for (int j=2; j<ndim_tab[1]-2; ++j) {
         int    l = j*ndim_tab[0]+ i;// (i  , j  )
         int    l1= l+1;              // (i+1, j  )
@@ -344,89 +332,54 @@ __global__ void diffusion( int* ndim_tab,   double* T, double* bilan, double* dx
 }
 
 
+
+
 ////
 //// condition_limite 
 ////
 __global__ void condition_limite(int* ndim_tab, double* T, int nfic) {
 
-    //On récupère les coordonnées du point à traiter.
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+  //On récupère les coordonnées de la colonne à traiter.
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
   
-    for (int64_t ific = 0; ific < nfic ; ++ific )
-    {  
-        //periodicite en Jmax et Jmin
-        if(i < ndim_tab[0]){  
-            //Jmin
-            int l0   = ific*ndim_tab[0] +i;
-            int l1   = ndim_tab[0]*(ndim_tab[1]-2*nfic +ific) +i;
+  if(i < ndim_tab[0]){
+    //periodicite en Jmax et Jmin
+    for (int64_t ific = 0; ific < nfic ; ++ific ) {
+      //Jmin
+      int l0   = ific*ndim_tab[0] +i;
+      int l1   = ndim_tab[0]*(ndim_tab[1]-2*nfic +ific) +i;
 
-            T[l0] = T[l1];
+      T[l0] = T[l1];
 
-            //Jmax
-            l0   = ndim_tab[0]*(ndim_tab[1]-nfic +ific) +i;
-            l1   = ndim_tab[0]*(nfic +ific) +i;
+      //Jmax
+      l0   = ndim_tab[0]*(ndim_tab[1]-nfic +ific) +i;
+      l1   = ndim_tab[0]*(nfic +ific) +i;
 
-            T[l0] = T[l1];
-        }
+      T[l0] = T[l1];
     }
 
-    for (int64_t ific = 0; ific < nfic ; ++ific )
-    { 
-        //periodicité en Imax et Imin
-        if(j < ndim_tab[1])
-        {  
-            //Imin
-            int l0   = ific +j*ndim_tab[0]; 
-            int l1   = l0 + ndim_tab[0] - 2*nfic;
+    //periodicité en Imax et Imin
+    if (i<nfic || i>=ndim_tab[0]-nfic) {
+      for (int64_t j = 0; j < ndim_tab[1]  ; ++j ) {  
+        //Imin
+        int l0   = i +j*ndim_tab[0]; 
+        int l1   = l0 + ndim_tab[0] - 2*nfic;
+ 
+        T[l0] = T[l1];
 
-            T[l0] = T[l1];
+        //Imax
+        l0   = i + j*ndim_tab[0];
+        l1   = l0 - ndim_tab[0] + 2*nfic;
 
-            //Imax
-            l0   = ific + (j+1)*ndim_tab[0] - nfic;
-            l1   = l0 - ndim_tab[0] + 2*nfic;
-
-            T[l0] = T[l1];
-        }
+        T[l0] = T[l1];
+      }
     }
+  }
+
 }
 
 
 
 
 
-/*
-  const double dt =0.005;  // pas de temps
-  double U[2];
-  U[0]  =1.;      // vitesse advection
-  U[1]  =1.;
- 
-  const double mu =0.0005;   // coeff diffusion
-  int Nitmax      =2000;
-  int Stepmax     = 2;
 
-  //Boucle en temps
-  for (int64_t nit = 0; nit < Nitmax ; ++nit )
-  { 
-    //Boucle Runge-Kutta
-    double *Tin;
-    double *Tout;
-    double *Tbilan;
-    for (int64_t step = 0; step < Stepmax ; ++step )
-    {
-      //mise a jour point courant
-      if(step==0) { Tin = T0; Tout= T1; Tbilan= T0;}
-      else        { Tin = T0; Tout= T0; Tbilan= T1;}
-
-      //advection
-      advection(Ndim_tab, Tbilan, bilan,  dx, U , step);
-
-      diffusion(Ndim_tab, Tbilan, bilan,  dx, mu);
-      mise_a_jour(Ndim_tab, Tin, Tout, bilan,  dt);
-
-      //Application Condition limite
-      condition_limite(Ndim_tab, Tout, nfic);     
-
-    }  // Nstepmax
-  }  // Nitmax
-*/

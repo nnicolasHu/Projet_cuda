@@ -239,6 +239,14 @@ advectiondiffusion: advectiondiffusion.o walltime.o
 
 run: build
 	$(EXEC) ./advectiondiffusion
+
+draw : postresultat script.conf
+	./postresultat Sortie.txt
+	gnuplot script.conf -persist
+
+verif : resRef.txt res.txt
+	python3 verif_calcul.py
+
 clean:
 	rm -f *.o advectiondiffusion Sortie.txt
 clobber: clean
