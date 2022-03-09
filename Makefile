@@ -248,7 +248,7 @@ verif : resRef.txt res.txt
 	python3 verif_calcul.py
 
 clean:
-	rm -f *.o advectiondiffusion Sortie.txt
+	rm -f *.o advectiondiffusion *~ Sortie.txt res.txt res_Sortie.txt tmoy.txt
 clobber: clean
 
 #seq : advectiondiffusion_seq.exe

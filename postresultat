@@ -1,4 +1,4 @@
-#!/bin/ksh
+#!/bin/bash
 cp vide.txt res.txt
 for i
 do
