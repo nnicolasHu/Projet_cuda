@@ -21,8 +21,8 @@
 
 void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy);
 double *InitGPUVector(long int N);
+int *InitGPUVector_int(long int N);
 
-//void condition_limite(int* ndim_tab, double* T, int nfic);
 
 
 __global__ void mise_a_jour( int* ndim_tab,   double* T0, double* T1, double* bilan, const double dt, int step);
@@ -55,7 +55,8 @@ int main( int nargc, char* argv[])
   Ndim_tab[0] = dim[0]+2*nfic; 
   Ndim_tab[1] = dim[1]+2*nfic;  
 
-  double *T1_GPU, *T0_GPU, *bilan_GPU;
+  double *T1_GPU, *T0_GPU, *bilan_GPU,*U_GPU,*dxy_GPU;
+  int *Ndim_tab_GPU;
   double *x,*y, *T0;
   x       = new double[Ndim_tab[0]];
   y       = new double[Ndim_tab[1]];
@@ -67,6 +68,17 @@ int main( int nargc, char* argv[])
   dxy[0] = lx/ dim[0];
   dxy[1] = ly/ dim[1];
 
+
+  const double dt =0.004;  // pas de temps
+  double U[2];
+  U[0]  =1.;      // vitesse advection suivant axe X
+  U[1]  =1.;      // vitesse advection suivant axe Y
+
+ 
+  const double mu =0.0005;   // coeff diffusion
+  //int Nitmax      =1250;   // temps final = 5s
+  int Nitmax      =1875;     // temps final = 7.5s
+  int Stepmax     = 2;       //schema  RK2
   /* 1- Generation des donnees sur le CPU (host)*/
   startTime=walltime(&clockZero);
   init( Ndim_tab, T0, x, y, dxy);
@@ -91,10 +103,33 @@ int main( int nargc, char* argv[])
   bilan_GPU = InitGPUVector(Ndim_tab[0]*Ndim_tab[1]);
   T1_GPU = InitGPUVector(Ndim_tab[0]*Ndim_tab[1]);
   T0_GPU = InitGPUVector(Ndim_tab[0]*Ndim_tab[1]);
-
+  
+  U_GPU = InitGPUVector(2);
+  dxy_GPU = InitGPUVector(2);
+  Ndim_tab_GPU = InitGPUVector_int(2);
+  
 
   /* 2-b) Transfert sur GPU */
-  err = cudaMemcpy(T0_GPU, T0, Ndim_tab[0]*Ndim_tab[1], cudaMemcpyHostToDevice);
+  size_t size = Ndim_tab[0]*Ndim_tab[1] * sizeof(double);
+  err = cudaMemcpy(U_GPU, U, 2*sizeof(double), cudaMemcpyHostToDevice);
+  if (err != cudaSuccess){
+    fprintf(stderr, "Failed to copy vector U from host to device T0_GPU (error code %s)!\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+  err = cudaMemcpy(dxy_GPU, dxy, 2*sizeof(double), cudaMemcpyHostToDevice);
+  if (err != cudaSuccess){
+    fprintf(stderr, "Failed to copy vector dxy from host to device T0_GPU (error code %s)!\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+  err = cudaMemcpy(Ndim_tab_GPU, Ndim_tab, 2*sizeof(int), cudaMemcpyHostToDevice);
+  if (err != cudaSuccess){
+    fprintf(stderr, "Failed to copy vector Ndim_tab from host to device T0_GPU (error code %s)!\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+
+
+  
+  err = cudaMemcpy(T0_GPU, T0, size, cudaMemcpyHostToDevice);
   if (err != cudaSuccess){
     fprintf(stderr, "Failed to copy vector T0 from host to device T0_GPU (error code %s)!\n", cudaGetErrorString(err));
     exit(EXIT_FAILURE);
@@ -104,16 +139,6 @@ int main( int nargc, char* argv[])
   printf("Time for transfert CPU->GPU : %6.4f(ms)\n", elapsedTime*1000);
 
   /* 3- Calcul sur GPU*/
-  const double dt =0.004;  // pas de temps
-  double U[2];
-  U[0]  =1.;      // vitesse advection suivant axe X
-  U[1]  =1.;      // vitesse advection suivant axe Y
-
- 
-  const double mu =0.0005;   // coeff diffusion
-  //int Nitmax      =1250;   // temps final = 5s
-  int Nitmax      =1875;     // temps final = 7.5s
-  int Stepmax     = 2;       //schema  RK2
 
   int threadsPerBlock = 32;
   int blocksPerGrid =(Ndim_tab[0] + threadsPerBlock - 1) / threadsPerBlock;
@@ -125,6 +150,7 @@ int main( int nargc, char* argv[])
     double *Tin;
     double *Tout;
     double *Tbilan;
+
     for (int64_t step = 0; step < Stepmax ; ++step )
     { 
 
@@ -132,7 +158,7 @@ int main( int nargc, char* argv[])
       else        { Tin = T0_GPU; Tout= T0_GPU; Tbilan=T1_GPU;}
 
       //advection
-      advection<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tbilan, bilan_GPU,  dxy, U , step);
+      advection<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab_GPU, Tbilan, bilan_GPU,  dxy_GPU, U_GPU , step);
       cudaDeviceSynchronize();
       err = cudaGetLastError();
       if (err != cudaSuccess) {
@@ -140,7 +166,7 @@ int main( int nargc, char* argv[])
         exit(EXIT_FAILURE);
       }
 
-      diffusion<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tbilan, bilan_GPU,  dxy, mu);
+      diffusion<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab_GPU, Tbilan, bilan_GPU,  dxy_GPU, mu);
       cudaDeviceSynchronize();
       err = cudaGetLastError();
       if (err != cudaSuccess) {
@@ -148,7 +174,7 @@ int main( int nargc, char* argv[])
         exit(EXIT_FAILURE);
       }
 
-      mise_a_jour<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tin, Tout, bilan_GPU,  dt, step);
+      mise_a_jour<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab_GPU, Tin, Tout, bilan_GPU,  dt, step);
       cudaDeviceSynchronize();
       err = cudaGetLastError();
       if (err != cudaSuccess) {
@@ -157,7 +183,7 @@ int main( int nargc, char* argv[])
       }
 
       //Application Condition limite
-      condition_limite<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab, Tout, nfic);
+      condition_limite<<<blocksPerGrid, threadsPerBlock>>>(Ndim_tab_GPU, Tout, nfic);
       cudaDeviceSynchronize();
       err = cudaGetLastError();
       if (err != cudaSuccess) {
@@ -171,7 +197,8 @@ int main( int nargc, char* argv[])
   printf("Time for GPU calculus : %6.4f(ms)\n", elapsedTime*1000);
 
   /* 4- Transfert GPU (device) vers CPU (host)*/
-  err = cudaMemcpy(T0, T0_GPU, Ndim_tab[0]*Ndim_tab[1], cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+  err = cudaMemcpy(T0, T0_GPU, size, cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
   elapsedTime=walltime(&startTime);
   if (err != cudaSuccess){
@@ -195,6 +222,7 @@ int main( int nargc, char* argv[])
   /* 6- Nettoyage */
   delete [] T0; delete [] x, delete [] y;
   cudaFree(bilan_GPU);cudaFree(T1_GPU);cudaFree(T0_GPU);
+  cudaFree(U_GPU); cudaFree(dxy_GPU); cudaFree(Ndim_tab_GPU);
   cudaDeviceReset();
 
   return EXIT_SUCCESS;
@@ -213,7 +241,17 @@ double *InitGPUVector(long int N){
     }
   return d_x;
 }
-
+int *InitGPUVector_int(long int N){
+  cudaError_t err = cudaSuccess;
+  int *d_x;
+  err=cudaMalloc((void **)&d_x, N*sizeof(int));
+  if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate device vector (error code %s)!\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+  return d_x;
+}
 
 
 ////
