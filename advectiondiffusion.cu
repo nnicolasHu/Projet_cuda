@@ -19,7 +19,7 @@
 #include "walltime.c"
 
 
-void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy);
+void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy, double* xy0 );
 double *InitGPUVector(long int N);
 int *InitGPUVector_int(long int N);
 
@@ -62,6 +62,9 @@ int main( int nargc, char* argv[])
   y       = new double[Ndim_tab[1]];
   T0      = new double[Ndim_tab[0]*Ndim_tab[1]]; 
   
+  double xy0[2];
+  xy0[0]=0;
+  xy0[1]=0;
   double lx =10;
   double ly =10;
   double dxy[2];
@@ -78,10 +81,11 @@ int main( int nargc, char* argv[])
   const double mu =0.0005;   // coeff diffusion
   //int Nitmax      =1250;   // temps final = 5s
   int Nitmax      =1875;     // temps final = 7.5s
+  //int Nitmax = 1;
   int Stepmax     = 2;       //schema  RK2
   /* 1- Generation des donnees sur le CPU (host)*/
   startTime=walltime(&clockZero);
-  init( Ndim_tab, T0, x, y, dxy);
+  init( Ndim_tab, T0, x, y, dxy, xy0);
   elapsedTime=walltime(&startTime);
   printf("Time to generate datas at T=0 : %6.4f(ms)\n", elapsedTime*1000);
 
@@ -207,7 +211,7 @@ int main( int nargc, char* argv[])
   }
   printf("Time for transfert GPU->CPU : %6.4f(ms)\n", elapsedTime*1000);
 
-
+  /* 5- Sortie  */
   for (int64_t i = nfic; i < Ndim_tab[0]-nfic ; ++i ){ 
     for (int64_t j = nfic; j < Ndim_tab[1]-nfic ; ++j ){ 
       
@@ -220,7 +224,7 @@ int main( int nargc, char* argv[])
   fclose(out);
 
   /* 6- Nettoyage */
-  delete [] T0; delete [] x, delete [] y;
+  delete [] T0; delete [] x; delete [] y;
   cudaFree(bilan_GPU);cudaFree(T1_GPU);cudaFree(T0_GPU);
   cudaFree(U_GPU); cudaFree(dxy_GPU); cudaFree(Ndim_tab_GPU);
   cudaDeviceReset();
@@ -257,10 +261,10 @@ int *InitGPUVector_int(long int N){
 ////
 //// Init
 ////
-void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy)
+void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy, double* xy0 )
 {
-  const double x0 = 0.;
-  const double y0 = 0.;
+  const double x0 = xy0[0] +dxy[0]*0.5;
+  const double y0 = xy0[1] +dxy[1]*0.5;
   const double xinit = 5;
   const double yinit = 5;
 
@@ -285,8 +289,8 @@ void init( int* ndim_tab, double* T0, double* x , double* y, double* dxy)
 //On considère les variables suivantes:
 //  . On note ndim_tab[0] : la longueur totale de la grille.
 //  . On note ndim_tab[1] : la largeur totale de la grille.
-//  . dimBlock(blockDim.x, blockDim.y) à définir préalablement de manière à ce que blockDim.x divise ndim_tab[0] et que blockDim.y divise ndim_tab[1].
-//  . dimGrid(ndim_tab[0]/blockDim.x, ndim_tab[1]/blockDim.y)
+//  . dimBlock(blockDim.x, blockDim.y) à définir préalablement de manière à ce que blockDim.x divise ndim_tab[0]
+//  . dimGrid(ndim_tab[0]/blockDim.x, ndim_tab[1])
 
 ////
 //// mise a jour
@@ -396,22 +400,30 @@ __global__ void condition_limite(int* ndim_tab, double* T, int nfic) {
       T[l0] = T[l1];
     }
 
-    //periodicité en Imax et Imin
-    if (i<nfic || i>=ndim_tab[0]-nfic) {
+    //periodicité en Imin
+    if (i<nfic ) { 
       for (int64_t j = 0; j < ndim_tab[1]  ; ++j ) {  
         //Imin
         int l0   = i +j*ndim_tab[0]; 
         int l1   = l0 + ndim_tab[0] - 2*nfic;
  
         T[l0] = T[l1];
+ 
+      }
+    }
 
+    //periodicité en Imax
+    if (i>=ndim_tab[0]-nfic) {
+      for (int64_t j = 0; j < ndim_tab[1]  ; ++j ) {
         //Imax
-        l0   = i + j*ndim_tab[0];
-        l1   = l0 - ndim_tab[0] + 2*nfic;
+        int l0   = i + j*ndim_tab[0];
+        int l1   = l0 - ndim_tab[0] + 2*nfic;
 
         T[l0] = T[l1];
       }
     }
+
+
   }
 
 }

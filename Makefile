@@ -249,7 +249,7 @@ verif : resRef.txt res.txt
 
 clean:
 	rm -f *.o advectiondiffusion *~ Sortie.txt res.txt res_Sortie.txt tmoy.txt
-clobber: clean
+
 
 #seq : advectiondiffusion_seq.exe
 #CFLAGS = -Wall -fPIC -O2 -mtune=native -fopenmp
